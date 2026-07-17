@@ -48,7 +48,8 @@ def _resolve_pipeline_arg(args: argparse.Namespace) -> str:
 
 
 def cmd_process(args: argparse.Namespace) -> None:
-    pipeline = _load_pipeline(_resolve_pipeline_arg(args))
+    pipeline_spec = _resolve_pipeline_arg(args)
+    pipeline = _load_pipeline(pipeline_spec)
     state_dir = Path(args.state_dir)
     state_dir.mkdir(parents=True, exist_ok=True)
 
@@ -58,11 +59,11 @@ def cmd_process(args: argparse.Namespace) -> None:
         stage = next((s for s in pipeline if s.name == args.stage), None)
         if stage is None:
             raise SystemExit(f"Unknown stage {args.stage!r}")
-        run_stage(stage, state_dir, once=args.once)
+        run_stage(stage, state_dir, once=args.once, pipeline=pipeline)
     else:
         from revenant.supervisor import run_supervisor
 
-        run_supervisor(pipeline, state_dir)
+        run_supervisor(pipeline, state_dir, pipeline_spec)
 
 
 def cmd_status(args: argparse.Namespace) -> None:

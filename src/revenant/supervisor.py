@@ -6,6 +6,7 @@ section 10.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import time
@@ -20,15 +21,27 @@ from revenant.stage_runner import is_upstream_durably_done, load_resume_point
 POLL_INTERVAL_SECONDS = 1.0
 
 
-def spawn_stage(stage_name: str) -> subprocess.Popen:
+def spawn_stage(stage_name: str, pipeline_spec: str, state_dir: Path) -> subprocess.Popen:
+    env = os.environ.copy()
+    env["REVENANT_PIPELINE"] = pipeline_spec
     return subprocess.Popen(
-        [sys.executable, "-m", "revenant.cli", "process", "--stage", stage_name]
+        [
+            sys.executable,
+            "-m",
+            "revenant.cli",
+            "--state-dir",
+            str(state_dir),
+            "process",
+            "--stage",
+            stage_name,
+        ],
+        env=env,
     )
 
 
-def run_supervisor(pipeline: Sequence[StageConfig], state_dir: Path) -> None:
+def run_supervisor(pipeline: Sequence[StageConfig], state_dir: Path, pipeline_spec: str) -> None:
     procs: dict[str, subprocess.Popen] = {
-        stage.name: spawn_stage(stage.name) for stage in pipeline
+        stage.name: spawn_stage(stage.name, pipeline_spec, state_dir) for stage in pipeline
     }
     done: set[str] = set()
     input_final_seq = None
@@ -48,24 +61,13 @@ def run_supervisor(pipeline: Sequence[StageConfig], state_dir: Path) -> None:
                 if ret is None:
                     continue
                 if ret == 0:
-                    last_consumed_seq, _, _ = load_resume_point(stage, state_dir)
-                    if stage.upstream == "input":
-                        upstream_done = last_consumed_seq >= (input_final_seq or 0)
-                    else:
-                        upstream_stage = next(
-                            (candidate for candidate in pipeline if candidate.name == stage.upstream),
-                            None,
-                        )
-                        if upstream_stage is None:
-                            raise ValueError(f"Unknown upstream stage {stage.upstream!r}")
-                        upstream_consumed, upstream_emitted, _ = load_resume_point(upstream_stage, state_dir)
-                        upstream_done = upstream_consumed >= upstream_emitted
-                    if upstream_done:
+                    stage_done = is_upstream_durably_done(stage, state_dir, input_final_seq, pipeline)
+                    if stage_done:
                         done.add(stage.name)
                     else:
-                        procs[stage.name] = spawn_stage(stage.name)
+                        procs[stage.name] = spawn_stage(stage.name, pipeline_spec, state_dir)
                 else:
-                    procs[stage.name] = spawn_stage(stage.name)
+                    procs[stage.name] = spawn_stage(stage.name, pipeline_spec, state_dir)
 
             status = {
                 "state": "running",
