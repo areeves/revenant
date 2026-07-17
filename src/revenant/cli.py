@@ -25,6 +25,13 @@ def _load_pipeline(dotted_path: str) -> list[StageConfig]:
         raise ValueError(
             f"--pipeline must be of the form 'module.path:ATTR_NAME', got {dotted_path!r}"
         )
+    # Console-script entry points (unlike `python -m` or `python script.py`)
+    # do not add the current directory to sys.path, so a pipeline module
+    # living in the user's own project directory would otherwise never be
+    # importable when running the installed `revenant` command from there.
+    cwd = os.getcwd()
+    if cwd not in sys.path:
+        sys.path.insert(0, cwd)
     module = importlib.import_module(module_path)
     pipeline = getattr(module, attr)
     return list(pipeline)

@@ -30,6 +30,12 @@ cd revenant
 pip install -e ".[dev]"
 ```
 
+## Examples
+
+See [`examples/`](examples/) for two reference pipelines (a stateful
+word-count pipeline, and a planner/worker split pipeline) with
+runnable `make_input.py` seed scripts.
+
 ## Quick start
 
 Define your pipeline as a list of `StageConfig` objects:
