@@ -5,6 +5,7 @@ import sys
 import pytest
 
 from revenant.config import StageConfig
+from revenant.io_utils import read_input_final_seq
 from revenant.stage_runner import LockHeldError, acquire_lock, run_stage
 from revenant.step import Step
 
@@ -59,8 +60,34 @@ def test_run_stage_drains_input_and_writes_checkpoint(tmp_path):
         + "\n"
     )
 
-    run_stage(stage, state_dir, input_final_seq=2)
+    run_stage(stage, state_dir)
 
     checkpoint = json.loads((stage.checkpoint_path(state_dir)).read_text())
     assert checkpoint["last_consumed_seq"] == 2
     assert checkpoint["last_emitted_seq"] == 2
+
+
+def test_read_input_final_seq_returns_checkpoint_value(tmp_path):
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    input_path = state_dir / "input.jsonl"
+    input_path.write_text(
+        json.dumps(
+            {
+                "type": "checkpoint",
+                "src_seq": 5,
+                "last_emitted_seq": 5,
+                "state": None,
+            }
+        )
+        + "\n"
+    )
+
+    assert read_input_final_seq(state_dir) == 5
+
+
+def test_read_input_final_seq_returns_none_when_missing(tmp_path):
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+
+    assert read_input_final_seq(state_dir) is None

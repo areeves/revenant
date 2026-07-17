@@ -21,6 +21,7 @@ from revenant.io_utils import (
     atomic_append_lines,
     atomic_write_json,
     iter_records_after,
+    read_input_final_seq,
     read_last_checkpoint_line,
 )
 from revenant.step import RetryableError, SkipItem
@@ -118,7 +119,6 @@ def run_stage(
     stage: StageConfig,
     state_dir: Path,
     once: bool = False,
-    input_final_seq: int | None = None,
     pipeline: Sequence[StageConfig] | None = None,
 ) -> None:
     """Run one stage's processing loop until its upstream is durably done.
@@ -133,6 +133,8 @@ def run_stage(
 
         step = stage.step_class()
         state = step.load(saved_state)
+
+        input_final_seq = read_input_final_seq(state_dir)
 
         while True:
             next_item = None

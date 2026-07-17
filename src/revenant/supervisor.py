@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Sequence
 
 from revenant.config import StageConfig
-from revenant.io_utils import atomic_write_json, read_last_checkpoint_line
+from revenant.io_utils import atomic_write_json, read_input_final_seq
 from revenant.stage_runner import is_upstream_durably_done, load_resume_point
 
 POLL_INTERVAL_SECONDS = 1.0
@@ -44,12 +44,7 @@ def run_supervisor(pipeline: Sequence[StageConfig], state_dir: Path, pipeline_sp
         stage.name: spawn_stage(stage.name, pipeline_spec, state_dir) for stage in pipeline
     }
     done: set[str] = set()
-    input_final_seq = None
-    input_path = state_dir / "input.jsonl"
-    if input_path.exists():
-        last_checkpoint = read_last_checkpoint_line(input_path)
-        if last_checkpoint is not None:
-            input_final_seq = last_checkpoint.get("last_emitted_seq")
+    input_final_seq = read_input_final_seq(state_dir)
 
     try:
         while len(done) < len(pipeline):

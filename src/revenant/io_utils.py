@@ -64,6 +64,20 @@ def read_last_checkpoint_line(path: Path) -> dict | None:
     return last_checkpoint
 
 
+def read_input_final_seq(state_dir: Path) -> int | None:
+    """Return the total number of items ever written to input.jsonl.
+
+    Input is treated as a fixed, fully-assembled batch before the
+    pipeline starts (docs/design.md, section 1), so this value is
+    stable for the life of a run and safe to read independently by any
+    stage process without coordination.
+    """
+    last_checkpoint = read_last_checkpoint_line(state_dir / "input.jsonl")
+    if last_checkpoint is None:
+        return None
+    return last_checkpoint.get("last_emitted_seq")
+
+
 def iter_records_after(path: Path, after_seq: int) -> Iterable[dict]:
     """Yield committed `type: record` lines with seq > after_seq.
 
