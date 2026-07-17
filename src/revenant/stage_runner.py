@@ -14,13 +14,16 @@ import socket
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Sequence
 
 from revenant.config import StageConfig
 from revenant.io_utils import (
     atomic_append_lines,
     atomic_write_json,
+    iter_records_after,
     read_last_checkpoint_line,
 )
+from revenant.step import RetryableError, SkipItem
 
 POLL_INTERVAL_SECONDS = 1.0
 
@@ -39,9 +42,23 @@ def acquire_lock(lock_path: Path) -> None:
             existing = lock_path.read_text()
         except OSError:
             existing = ""
-        # TODO: parse existing PID, check liveness via os.kill(pid, 0),
-        # raise LockHeldError only if the PID is still alive. Overwrite
-        # (treat as stale) otherwise.
+        if existing:
+            import json
+
+            try:
+                parsed = json.loads(existing)
+            except json.JSONDecodeError:
+                parsed = {}
+            pid = parsed.get("pid")
+            if pid is not None:
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    pass
+                except PermissionError:
+                    raise LockHeldError(f"Lock held by pid {pid}") from None
+                else:
+                    raise LockHeldError(f"Lock held by pid {pid}") from None
     atomic_write_json(
         lock_path,
         {"pid": os.getpid(), "hostname": socket.gethostname(), "started_at": _now_iso()},
@@ -73,20 +90,37 @@ def load_resume_point(stage: StageConfig, state_dir: Path) -> tuple[int, int, ob
     return last["src_seq"], last["last_emitted_seq"], last["state"]
 
 
-def is_upstream_durably_done(stage: StageConfig, state_dir: Path, input_final_seq: int) -> bool:
+def is_upstream_durably_done(
+    stage: StageConfig,
+    state_dir: Path,
+    input_final_seq: int | None,
+    pipeline: Sequence[StageConfig] | None = None,
+) -> bool:
     """Recursive drain check. See docs/design.md, section 7."""
+    my_consumed, _, _ = load_resume_point(stage, state_dir)
     if stage.upstream == "input":
-        _, last_emitted, _ = 0, input_final_seq, None
-        my_consumed, _, _ = load_resume_point(stage, state_dir)
-        return my_consumed >= input_final_seq
+        final_seq = input_final_seq if input_final_seq is not None else 0
+        return my_consumed >= final_seq
 
-    # TODO: walk the chain of StageConfig objects to find the upstream
-    # stage's config, check whether *it* is durably done, and compare
-    # this stage's last_consumed_seq to the upstream's last_emitted_seq.
-    raise NotImplementedError
+    if pipeline is None:
+        raise ValueError("pipeline is required to resolve upstream drain state")
+
+    upstream_stage = next((candidate for candidate in pipeline if candidate.name == stage.upstream), None)
+    if upstream_stage is None:
+        raise ValueError(f"Unknown upstream stage {stage.upstream!r} for {stage.name!r}")
+
+    upstream_done = is_upstream_durably_done(upstream_stage, state_dir, input_final_seq, pipeline)
+    _, upstream_last_emitted, _ = load_resume_point(upstream_stage, state_dir)
+    return upstream_done and my_consumed >= upstream_last_emitted
 
 
-def run_stage(stage: StageConfig, state_dir: Path, once: bool = False) -> None:
+def run_stage(
+    stage: StageConfig,
+    state_dir: Path,
+    once: bool = False,
+    input_final_seq: int | None = None,
+    pipeline: Sequence[StageConfig] | None = None,
+) -> None:
     """Run one stage's processing loop until its upstream is durably done.
 
     If `once` is True, process at most a single available item and
@@ -101,17 +135,19 @@ def run_stage(stage: StageConfig, state_dir: Path, once: bool = False) -> None:
         state = step.load(saved_state)
 
         while True:
-            # TODO: read the next unconsumed record from
-            # stage.upstream_output_path(state_dir), i.e. the first
-            # committed record with seq > last_consumed_seq.
-            next_item = None  # placeholder
+            next_item = None
+            for record in iter_records_after(stage.upstream_output_path(state_dir), last_consumed_seq):
+                next_item = record
+                break
 
             if next_item is None:
-                # TODO: replace with the real is_upstream_durably_done() call
-                upstream_done = False
-                if upstream_done:
-                    return
-                if once:
+                upstream_done = is_upstream_durably_done(
+                    stage,
+                    state_dir,
+                    input_final_seq,
+                    pipeline,
+                )
+                if upstream_done or once:
                     return
                 time.sleep(POLL_INTERVAL_SECONDS)
                 continue
@@ -123,6 +159,12 @@ def run_stage(stage: StageConfig, state_dir: Path, once: bool = False) -> None:
                     outputs.append(next(gen))
             except StopIteration as stop:
                 new_state = stop.value
+            except RetryableError:
+                time.sleep(POLL_INTERVAL_SECONDS)
+                continue
+            except SkipItem:
+                new_state = state
+                outputs = []
 
             # Build and write the atomic commit block: buffered output
             # records + one checkpoint line (docs/design.md, section 6).
@@ -151,6 +193,12 @@ def run_stage(stage: StageConfig, state_dir: Path, once: bool = False) -> None:
                 }
             )
             atomic_append_lines(stage.output_path(state_dir), lines)
+
+            if isinstance(outputs, list) and not outputs and new_state is state and next_item is not None:
+                atomic_append_lines(
+                    stage.deadletter_path(state_dir),
+                    [{"type": "deadletter", "src_seq": next_item["seq"], "payload": next_item["payload"]}],
+                )
 
             last_consumed_seq = next_item["seq"]
             last_emitted_seq = seq
