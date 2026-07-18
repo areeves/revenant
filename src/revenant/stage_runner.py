@@ -1,10 +1,9 @@
 """
 Generic stage-runner loop. See docs/design.md, sections 5-8.
 
-This is a scaffold: locking, checkpoint-loading, and the commit-write
-path are wired up; the polling loop's TODOs are where item-by-item
-logic (calling into the Step, handling RetryableError/SkipItem, seq
-bookkeeping) still needs to be filled in.
+This module implements the per-item loop for reading upstream records,
+checkpointing progress, handling RetryableError and SkipItem, and
+tracking drain state for end-to-end stage execution.
 """
 
 from __future__ import annotations
@@ -77,6 +76,9 @@ def load_resume_point(stage: StageConfig, state_dir: Path) -> tuple[int, int, ob
     stage's own output file for the last checkpoint line if the cache
     is missing (docs/design.md, section 5.2).
     """
+    # The on-disk checkpoint field "src_seq" corresponds to the in-code
+    # variable last_consumed_seq, even though the JSON schema and Python
+    # names differ.
     checkpoint_path = stage.checkpoint_path(state_dir)
     if checkpoint_path.exists():
         import json
@@ -137,10 +139,7 @@ def run_stage(
         input_final_seq = read_input_final_seq(state_dir)
 
         while True:
-            next_item = None
-            for record in iter_records_after(stage.upstream_output_path(state_dir), last_consumed_seq):
-                next_item = record
-                break
+            next_item = next(iter_records_after(stage.upstream_output_path(state_dir), last_consumed_seq), None)
 
             if next_item is None:
                 upstream_done = is_upstream_durably_done(
@@ -155,16 +154,20 @@ def run_stage(
                 continue
 
             outputs = []
-            gen = step.process(next_item["payload"], state)
+            skipped = False
             try:
+                gen = step.process(next_item["payload"], state)
                 while True:
                     outputs.append(next(gen))
             except StopIteration as stop:
                 new_state = stop.value
             except RetryableError:
                 time.sleep(POLL_INTERVAL_SECONDS)
+                if once:
+                    return
                 continue
             except SkipItem:
+                skipped = True
                 new_state = state
                 outputs = []
 
@@ -196,7 +199,7 @@ def run_stage(
             )
             atomic_append_lines(stage.output_path(state_dir), lines)
 
-            if isinstance(outputs, list) and not outputs and new_state is state and next_item is not None:
+            if skipped:
                 atomic_append_lines(
                     stage.deadletter_path(state_dir),
                     [{"type": "deadletter", "src_seq": next_item["seq"], "payload": next_item["payload"]}],

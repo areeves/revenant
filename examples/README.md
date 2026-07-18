@@ -29,12 +29,9 @@ revenant --pipeline examples.wordcount.pipeline:PIPELINE process
 revenant --pipeline examples.wordcount.pipeline:PIPELINE status
 ```
 
-**Current limitation:** `stage_runner.py`'s core per-item loop still
-has a few `TODO`s left (see the main README) — reading the next
-committed upstream record and the full drain-chain check aren't wired
-up yet. Until those are filled in, `revenant process` won't actually
-advance a stage end-to-end. The `Step` classes above are already
-correct and can be exercised directly without the runner, e.g.:
+The stage runner is fully implemented and the examples are runnable
+end-to-end through the CLI. The `Step` classes above can also be
+exercised directly without the runner, e.g.:
 
 ```python
 from examples.wordcount.pipeline import SplitWords

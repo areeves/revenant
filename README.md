@@ -9,23 +9,22 @@ JSON files on disk -- so a crash or restart only reprocesses the item
 that was interrupted, not the whole run.
 
 See [`docs/design.md`](docs/design.md) for the full design rationale.
-This repo is currently a scaffold: the module layout, on-disk schemas,
-and CLI shape are in place; the core per-item loop in
-`stage_runner.py` has a few `TODO`s left to fill in (see that file).
+The stage runner is fully implemented and runnable end-to-end through
+the CLI, so the examples can be exercised directly from the repository.
 
 ## Install
 
 Directly from GitHub, no PyPI publish required:
 
 ```bash
-pip install git+https://github.com/<your-username>/revenant.git
+pip install git+https://github.com/TODO-replace-with-your-username/revenant.git
 ```
 
 Or for local development (editable install, so code changes take effect
 immediately):
 
 ```bash
-git clone https://github.com/<your-username>/revenant.git
+git clone https://github.com/TODO-replace-with-your-username/revenant.git
 cd revenant
 pip install -e ".[dev]"
 ```

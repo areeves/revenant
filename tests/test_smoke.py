@@ -7,7 +7,7 @@ import pytest
 from revenant.config import StageConfig
 from revenant.io_utils import read_input_final_seq
 from revenant.stage_runner import LockHeldError, acquire_lock, run_stage
-from revenant.step import Step
+from revenant.step import SkipItem, Step
 
 
 def test_package_imports():
@@ -65,6 +65,62 @@ def test_run_stage_drains_input_and_writes_checkpoint(tmp_path):
     checkpoint = json.loads((stage.checkpoint_path(state_dir)).read_text())
     assert checkpoint["last_consumed_seq"] == 2
     assert checkpoint["last_emitted_seq"] == 2
+
+
+def test_run_stage_deadletters_skipitem_and_writes_no_output_record(tmp_path):
+    class SkipStep(Step):
+        def process(self, payload, state):
+            raise SkipItem()
+
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    stage = StageConfig(name="A", step_class=SkipStep, upstream="input")
+    input_path = stage.upstream_output_path(state_dir)
+    input_path.write_text(
+        "\n".join(
+            [
+                json.dumps({"type": "record", "seq": 1, "src_seq": 1, "payload": {"value": 1}}),
+                json.dumps({"type": "checkpoint", "src_seq": 1, "last_emitted_seq": 1, "state": None}),
+            ]
+        )
+        + "\n"
+    )
+
+    run_stage(stage, state_dir)
+
+    deadletter_lines = [
+        json.loads(line) for line in (stage.deadletter_path(state_dir)).read_text().splitlines() if line.strip()
+    ]
+    output_lines = [json.loads(line) for line in (stage.output_path(state_dir)).read_text().splitlines() if line.strip()]
+
+    assert deadletter_lines[0]["src_seq"] == 1
+    assert not any(line.get("type") == "record" and line.get("src_seq") == 1 for line in output_lines)
+
+
+def test_run_stage_does_not_deadletter_empty_output_without_skipitem(tmp_path):
+    class EmptyStep(Step):
+        def process(self, payload, state):
+            if False:
+                yield payload
+            return state
+
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    stage = StageConfig(name="A", step_class=EmptyStep, upstream="input")
+    input_path = stage.upstream_output_path(state_dir)
+    input_path.write_text(
+        "\n".join(
+            [
+                json.dumps({"type": "record", "seq": 1, "src_seq": 1, "payload": {"value": 1}}),
+                json.dumps({"type": "checkpoint", "src_seq": 1, "last_emitted_seq": 1, "state": None}),
+            ]
+        )
+        + "\n"
+    )
+
+    run_stage(stage, state_dir)
+
+    assert not stage.deadletter_path(state_dir).exists()
 
 
 def test_read_input_final_seq_returns_checkpoint_value(tmp_path):
