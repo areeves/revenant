@@ -15,7 +15,7 @@ from typing import Sequence
 
 from revenant.config import StageConfig
 from revenant.io_utils import atomic_write_json, read_input_final_seq
-from revenant.stage_runner import is_upstream_durably_done, load_resume_point
+from revenant.stage_runner import is_stage_durably_done, load_resume_point
 
 POLL_INTERVAL_SECONDS = 1.0
 
@@ -55,7 +55,7 @@ def run_supervisor(pipeline: Sequence[StageConfig], state_dir: Path, pipeline_sp
                 if ret is None:
                     continue
                 if ret == 0:
-                    stage_done = is_upstream_durably_done(stage, state_dir, input_final_seq, pipeline)
+                    stage_done = is_stage_durably_done(stage, state_dir, input_final_seq, pipeline)
                     if stage_done:
                         done.add(stage.name)
                     else:

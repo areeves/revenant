@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from revenant.io_utils import atomic_append_lines
+from revenant.io_utils import atomic_append_lines, make_checkpoint_line, make_record_line
 
 DOCUMENTS = [
     {"document_id": "doc-a", "pages": 3},
@@ -25,25 +25,15 @@ def main() -> None:
         input_path.unlink()
 
     records = [
-        {
-            "type": "record",
-            "seq": i,
-            "src_seq": None,
-            "parent_seq": i,
-            "emitted_at": None,
-            "payload": doc,
-        }
+        make_record_line(
+            seq=i,
+            src_seq=i,
+            parent_seq=i,
+            payload=doc,
+        )
         for i, doc in enumerate(DOCUMENTS, start=1)
     ]
-    records.append(
-        {
-            "type": "checkpoint",
-            "src_seq": len(DOCUMENTS),
-            "last_emitted_seq": len(DOCUMENTS),
-            "state": None,
-            "committed_at": None,
-        }
-    )
+    records.append(make_checkpoint_line(last_consumed_seq=len(DOCUMENTS), last_emitted_seq=len(DOCUMENTS)))
     atomic_append_lines(input_path, records)
     print(f"Wrote {len(DOCUMENTS)} input records to {input_path}")
 

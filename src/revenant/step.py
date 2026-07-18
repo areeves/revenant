@@ -12,8 +12,10 @@ from typing import Any, Iterator
 class RetryableError(Exception):
     """Raise to indicate a transient failure.
 
-    The framework will retry this same item (with backoff), without
-    advancing the checkpoint.
+    The framework retries this same item without advancing the checkpoint.
+    Backoff and max-attempts escalation are not yet implemented; the
+    current behavior is an unconditional retry with a fixed poll-interval
+    delay.
     """
 
 

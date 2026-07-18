@@ -35,6 +35,15 @@ See [`examples/`](examples/) for two reference pipelines (a stateful
 word-count pipeline, and a planner/worker split pipeline) with
 runnable `make_input.py` seed scripts.
 
+## Design map
+
+| Design section | Implemented in |
+|---|---|
+| §4 Stage config | [src/revenant/config.py](src/revenant/config.py) |
+| §5–6 File formats / atomicity | [src/revenant/io_utils.py](src/revenant/io_utils.py) |
+| §7–8 Drain detection / Step interface | [src/revenant/stage_runner.py](src/revenant/stage_runner.py), [src/revenant/step.py](src/revenant/step.py) |
+| §9–10 CLI / Supervisor | [src/revenant/cli.py](src/revenant/cli.py), [src/revenant/supervisor.py](src/revenant/supervisor.py) |
+
 ## Quick start
 
 Define your pipeline as a list of `StageConfig` objects:

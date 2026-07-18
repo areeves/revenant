@@ -22,6 +22,31 @@ from typing import Type
 from revenant.step import Step
 
 
+def validate_pipeline(pipeline: list[StageConfig]) -> None:
+    """Validate pipeline wiring before the stage runner uses it."""
+    names = [stage.name for stage in pipeline]
+    if len(names) != len(set(names)):
+        duplicates = sorted({name for name in names if names.count(name) > 1})
+        raise ValueError(f"Duplicate stage names: {', '.join(duplicates)}")
+
+    known_names = set()
+    for index, stage in enumerate(pipeline):
+        if stage.upstream == "input":
+            known_names.add(stage.name)
+            continue
+
+        if stage.upstream in known_names:
+            known_names.add(stage.name)
+            continue
+
+        if stage.upstream in names[:index]:
+            raise ValueError(
+                f"Stage {stage.name!r} references upstream {stage.upstream!r} that appears later in the pipeline"
+            )
+
+        raise ValueError(f"Stage {stage.name!r} references unknown upstream {stage.upstream!r}")
+
+
 @dataclass(frozen=True)
 class StageConfig:
     name: str

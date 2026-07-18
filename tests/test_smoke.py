@@ -4,8 +4,8 @@ import sys
 
 import pytest
 
-from revenant.config import StageConfig
-from revenant.io_utils import read_input_final_seq
+from revenant.config import StageConfig, validate_pipeline
+from revenant.io_utils import make_checkpoint_line, make_record_line, read_input_final_seq
 from revenant.stage_runner import LockHeldError, acquire_lock, run_stage
 from revenant.step import SkipItem, Step
 
@@ -52,9 +52,9 @@ def test_run_stage_drains_input_and_writes_checkpoint(tmp_path):
     input_path.write_text(
         "\n".join(
             [
-                json.dumps({"type": "record", "seq": 1, "src_seq": 1, "payload": {"value": 1}}),
-                json.dumps({"type": "record", "seq": 2, "src_seq": 2, "payload": {"value": 2}}),
-                json.dumps({"type": "checkpoint", "src_seq": 2, "last_emitted_seq": 2, "state": None}),
+                json.dumps(make_record_line(seq=1, src_seq=1, parent_seq=1, payload={"value": 1})),
+                json.dumps(make_record_line(seq=2, src_seq=2, parent_seq=2, payload={"value": 2})),
+                json.dumps(make_checkpoint_line(last_consumed_seq=2, last_emitted_seq=2, state=None)),
             ]
         )
         + "\n"
@@ -79,8 +79,8 @@ def test_run_stage_deadletters_skipitem_and_writes_no_output_record(tmp_path):
     input_path.write_text(
         "\n".join(
             [
-                json.dumps({"type": "record", "seq": 1, "src_seq": 1, "payload": {"value": 1}}),
-                json.dumps({"type": "checkpoint", "src_seq": 1, "last_emitted_seq": 1, "state": None}),
+                json.dumps(make_record_line(seq=1, src_seq=1, parent_seq=1, payload={"value": 1})),
+                json.dumps(make_checkpoint_line(last_consumed_seq=1, last_emitted_seq=1, state=None)),
             ]
         )
         + "\n"
@@ -111,8 +111,8 @@ def test_run_stage_does_not_deadletter_empty_output_without_skipitem(tmp_path):
     input_path.write_text(
         "\n".join(
             [
-                json.dumps({"type": "record", "seq": 1, "src_seq": 1, "payload": {"value": 1}}),
-                json.dumps({"type": "checkpoint", "src_seq": 1, "last_emitted_seq": 1, "state": None}),
+                json.dumps(make_record_line(seq=1, src_seq=1, parent_seq=1, payload={"value": 1})),
+                json.dumps(make_checkpoint_line(last_consumed_seq=1, last_emitted_seq=1, state=None)),
             ]
         )
         + "\n"
@@ -131,7 +131,7 @@ def test_read_input_final_seq_returns_checkpoint_value(tmp_path):
         json.dumps(
             {
                 "type": "checkpoint",
-                "src_seq": 5,
+                "last_consumed_seq": 5,
                 "last_emitted_seq": 5,
                 "state": None,
             }
@@ -147,3 +147,26 @@ def test_read_input_final_seq_returns_none_when_missing(tmp_path):
     state_dir.mkdir()
 
     assert read_input_final_seq(state_dir) is None
+
+
+def test_validate_pipeline_rejects_unknown_upstream_and_duplicate_names():
+    class DummyStep(Step):
+        def process(self, payload, state):
+            yield payload
+            return state
+
+    with pytest.raises(ValueError, match="unknown upstream"):
+        validate_pipeline(
+            [
+                StageConfig(name="A", step_class=DummyStep, upstream="input"),
+                StageConfig(name="B", step_class=DummyStep, upstream="missing"),
+            ]
+        )
+
+    with pytest.raises(ValueError, match="Duplicate stage names"):
+        validate_pipeline(
+            [
+                StageConfig(name="A", step_class=DummyStep, upstream="input"),
+                StageConfig(name="A", step_class=DummyStep, upstream="A"),
+            ]
+        )

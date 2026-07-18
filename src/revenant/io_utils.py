@@ -64,6 +64,31 @@ def read_last_checkpoint_line(path: Path) -> dict | None:
     return last_checkpoint
 
 
+def make_record_line(seq: int, src_seq: int, parent_seq: int | None, payload: dict, emitted_at: str | None = None) -> dict:
+    """Build a record-line dict with the schema used by stage output files."""
+    return {
+        "type": "record",
+        "seq": seq,
+        "src_seq": src_seq,
+        "parent_seq": parent_seq if parent_seq is not None else src_seq,
+        "emitted_at": emitted_at if emitted_at is not None else "",
+        "payload": payload,
+    }
+
+
+def make_checkpoint_line(last_consumed_seq: int, last_emitted_seq: int, state: Any | None = None, committed_at: str | None = None) -> dict:
+    """Build a checkpoint-line dict with the schema used by stage output files."""
+    # Record lines use src_seq for lineage/debugging, while checkpoint lines
+    # use last_consumed_seq to describe the confirmed upstream position.
+    return {
+        "type": "checkpoint",
+        "last_consumed_seq": last_consumed_seq,
+        "last_emitted_seq": last_emitted_seq,
+        "state": state,
+        "committed_at": committed_at if committed_at is not None else "",
+    }
+
+
 def read_input_final_seq(state_dir: Path) -> int | None:
     """Return the total number of items ever written to input.jsonl.
 
@@ -75,7 +100,7 @@ def read_input_final_seq(state_dir: Path) -> int | None:
     last_checkpoint = read_last_checkpoint_line(state_dir / "input.jsonl")
     if last_checkpoint is None:
         return None
-    return last_checkpoint.get("last_emitted_seq")
+    return last_checkpoint["last_emitted_seq"]
 
 
 def iter_records_after(path: Path, after_seq: int) -> Iterable[dict]:

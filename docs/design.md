@@ -108,13 +108,15 @@ Append-only JSON Lines. Two line types share the file: **record** lines (an emit
 **Checkpoint line:**
 
 ```json
-{"type": "checkpoint", "src_seq": 1523, "last_emitted_seq": 4822, "state": {"...": "..."}, "committed_at": "2026-07-16T14:22:03.040Z"}
+{"type": "checkpoint", "last_consumed_seq": 1523, "last_emitted_seq": 4822, "state": {"...": "..."}, "committed_at": "2026-07-16T14:22:03.040Z"}
 ```
 
-- `src_seq` — the upstream item's `seq` that this checkpoint confirms as fully, successfully processed.
+- `last_consumed_seq` — the upstream item's `seq` that this checkpoint confirms as fully, successfully processed.
 - `last_emitted_seq` — the highest `seq` this stage has ever written (i.e., the max `seq` among all record lines up to and including this commit block). Lets the stage resume seq-numbering without rescanning its own file.
 - `state` — the JSON-serializable projection of the step's residual/accumulator state as of this commit (see §8, `Step.checkpoint()`).
 - `committed_at` — for humans/debugging.
+
+Note that record-line `src_seq` and checkpoint-line `last_consumed_seq` are different concepts in the schema: record lines retain the upstream item's `seq` for lineage/debugging, while checkpoint lines use `last_consumed_seq` to record the last confirmed upstream item consumed by this stage.
 
 **Why this design (vs. a separate checkpoint-only file):** see §6. In short — a stage only ever emits records that are *already* confirmed by the time a downstream reader can see them, because the commit block (records + checkpoint) is written as a single atomic unit. This removes any window in which a downstream stage could observe outputs from an attempt that later turns out to have crashed, which matters because some steps are non-deterministic and a replayed attempt may not reproduce byte-identical output.
 
@@ -268,7 +270,7 @@ class Step:
 
 | Exception raised | Framework behavior |
 |---|---|
-| `RetryableError` | Log it; do **not** advance checkpoint; retry the same item (track attempt count / backoff, e.g. alongside `state` in the checkpoint cache); give up and escalate to a fatal crash after a configurable max-attempts. |
+| `RetryableError` | Log it; do **not** advance checkpoint; retry the same item immediately with the fixed poll-interval delay already used by the runner. Backoff and max-attempts escalation are not yet implemented, so this remains an open item rather than a fully specified policy. |
 | `SkipItem` | Advance checkpoint past this item; emit nothing for it; append a record to `A.deadletter.jsonl` for visibility; continue. |
 | Anything else (unhandled) | Do not catch. Process exits non-zero. Checkpoint untouched. This *is* the crash-recovery path — no special handling needed; the supervisor will restart this stage and it resumes from the last successful commit. |
 
@@ -313,7 +315,7 @@ revenant status                     # print each stage's offset / running-or-idl
 - **Adding new input mid-run.** Explicitly deferred — input is currently treated as a fixed, fully-assembled batch known before the pipeline starts (§1, §7). If this changes later, the fix is a single `input.closed.json` marker (`{"final_seq": N, "closed_at": "..."}`) written explicitly whenever input is done being appended to, which becomes the new base case for §7's recursion; every other stage boundary is unaffected. Two operating modes would fall out of this: batch mode (close input immediately, run to drain) vs. long-running/streaming mode (leave input open, keep enqueuing, only close it to deliberately shut the pipeline down for good).
 - **Snapshot frequency.** Confirmed: checkpoint after *every* completed item (not batched every N items), since tasks may be long-running and the cost of reprocessing more than one item on crash was judged not worth the savings from less-frequent snapshotting.
 - **Log rotation / compaction.** Not yet designed. `A.jsonl` grows unboundedly for the life of a run; if a stage's output file needs periodic compaction (e.g. dropping already-fully-consumed lines), note that `seq` numbers — not line-position-in-file — are the resumption unit specifically so this remains possible without breaking downstream consumers.
-- **Retry backoff policy for `RetryableError`.** Max attempts / backoff schedule not yet specified.
+- **Retry backoff policy for `RetryableError`.** Max attempts / backoff schedule not yet implemented; current behavior is an unconditional retry with the fixed poll-interval delay already used by the runner.
 - **Docker bind-mount atomicity verification.** Confirm the actual host filesystem backing the bind mount before relying on `write()`-append and `rename()` atomicity (§6's caveat) — this is load-bearing for the entire crash-safety story.
 
 ---

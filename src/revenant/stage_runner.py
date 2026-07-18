@@ -8,6 +8,7 @@ tracking drain state for end-to-end stage execution.
 
 from __future__ import annotations
 
+import json
 import os
 import socket
 import time
@@ -20,6 +21,8 @@ from revenant.io_utils import (
     atomic_append_lines,
     atomic_write_json,
     iter_records_after,
+    make_checkpoint_line,
+    make_record_line,
     read_input_final_seq,
     read_last_checkpoint_line,
 )
@@ -43,8 +46,6 @@ def acquire_lock(lock_path: Path) -> None:
         except OSError:
             existing = ""
         if existing:
-            import json
-
             try:
                 parsed = json.loads(existing)
             except json.JSONDecodeError:
@@ -76,13 +77,10 @@ def load_resume_point(stage: StageConfig, state_dir: Path) -> tuple[int, int, ob
     stage's own output file for the last checkpoint line if the cache
     is missing (docs/design.md, section 5.2).
     """
-    # The on-disk checkpoint field "src_seq" corresponds to the in-code
-    # variable last_consumed_seq, even though the JSON schema and Python
-    # names differ.
+    # Checkpoint lines use last_consumed_seq, while record lines still use
+    # src_seq for lineage/debugging; the names differ by schema purpose.
     checkpoint_path = stage.checkpoint_path(state_dir)
     if checkpoint_path.exists():
-        import json
-
         with open(checkpoint_path) as f:
             cached = json.load(f)
         return cached["last_consumed_seq"], cached["last_emitted_seq"], cached["state"]
@@ -90,16 +88,21 @@ def load_resume_point(stage: StageConfig, state_dir: Path) -> tuple[int, int, ob
     last = read_last_checkpoint_line(stage.output_path(state_dir))
     if last is None:
         return 0, 0, None
-    return last["src_seq"], last["last_emitted_seq"], last["state"]
+    return last["last_consumed_seq"], last["last_emitted_seq"], last["state"]
 
 
-def is_upstream_durably_done(
+def is_stage_durably_done(
     stage: StageConfig,
     state_dir: Path,
     input_final_seq: int | None,
     pipeline: Sequence[StageConfig] | None = None,
 ) -> bool:
-    """Recursive drain check. See docs/design.md, section 7."""
+    """Return whether this stage is durably done.
+
+    A stage is durably done when it has consumed every upstream item that
+    the upstream stage has already durably emitted, and its own consumed
+    position has reached the upstream's final emitted seq.
+    """
     my_consumed, _, _ = load_resume_point(stage, state_dir)
     if stage.upstream == "input":
         final_seq = input_final_seq if input_final_seq is not None else 0
@@ -112,9 +115,9 @@ def is_upstream_durably_done(
     if upstream_stage is None:
         raise ValueError(f"Unknown upstream stage {stage.upstream!r} for {stage.name!r}")
 
-    upstream_done = is_upstream_durably_done(upstream_stage, state_dir, input_final_seq, pipeline)
+    stage_done = is_stage_durably_done(upstream_stage, state_dir, input_final_seq, pipeline)
     _, upstream_last_emitted, _ = load_resume_point(upstream_stage, state_dir)
-    return upstream_done and my_consumed >= upstream_last_emitted
+    return stage_done and my_consumed >= upstream_last_emitted
 
 
 def run_stage(
@@ -142,13 +145,13 @@ def run_stage(
             next_item = next(iter_records_after(stage.upstream_output_path(state_dir), last_consumed_seq), None)
 
             if next_item is None:
-                upstream_done = is_upstream_durably_done(
+                stage_done = is_stage_durably_done(
                     stage,
                     state_dir,
                     input_final_seq,
                     pipeline,
                 )
-                if upstream_done or once:
+                if stage_done or once:
                     return
                 time.sleep(POLL_INTERVAL_SECONDS)
                 continue
@@ -178,24 +181,22 @@ def run_stage(
             for payload in outputs:
                 seq += 1
                 lines.append(
-                    {
-                        "type": "record",
-                        "seq": seq,
-                        "src_seq": next_item["seq"],
-                        "parent_seq": next_item.get("parent_seq", next_item["seq"]),
-                        "emitted_at": _now_iso(),
-                        "payload": payload,
-                    }
+                    make_record_line(
+                        seq=seq,
+                        src_seq=next_item["seq"],
+                        parent_seq=next_item.get("parent_seq", next_item["seq"]),
+                        payload=payload,
+                        emitted_at=_now_iso(),
+                    )
                 )
             checkpoint_state = step.checkpoint(new_state)
             lines.append(
-                {
-                    "type": "checkpoint",
-                    "src_seq": next_item["seq"],
-                    "last_emitted_seq": seq,
-                    "state": checkpoint_state,
-                    "committed_at": _now_iso(),
-                }
+                make_checkpoint_line(
+                    last_consumed_seq=next_item["seq"],
+                    last_emitted_seq=seq,
+                    state=checkpoint_state,
+                    committed_at=_now_iso(),
+                )
             )
             atomic_append_lines(stage.output_path(state_dir), lines)
 

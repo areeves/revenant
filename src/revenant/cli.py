@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
-from revenant.config import StageConfig
+from revenant.config import StageConfig, validate_pipeline
 
 
 def _load_pipeline(dotted_path: str) -> list[StageConfig]:
@@ -33,8 +33,9 @@ def _load_pipeline(dotted_path: str) -> list[StageConfig]:
     if cwd not in sys.path:
         sys.path.insert(0, cwd)
     module = importlib.import_module(module_path)
-    pipeline = getattr(module, attr)
-    return list(pipeline)
+    pipeline = list(getattr(module, attr))
+    validate_pipeline(pipeline)
+    return pipeline
 
 
 def _resolve_pipeline_arg(args: argparse.Namespace) -> str:
