@@ -3,8 +3,8 @@
 A crash-safe, resumable, file-based pipeline framework for Python.
 
 Runs a chain of stages over a batch of input items, where each stage can
-emit zero, one, or many outputs per input, stages run concurrently as
-separate processes, and all progress is durably checkpointed to plain
+emit zero, one, or many outputs per input. Stages run concurrently as
+separate processes and all progress is durably checkpointed to plain
 JSON files on disk -- so a crash or restart only reprocesses the item
 that was interrupted, not the whole run.
 
@@ -17,14 +17,14 @@ the CLI, so the examples can be exercised directly from the repository.
 Directly from GitHub, no PyPI publish required:
 
 ```bash
-pip install git+https://github.com/TODO-replace-with-your-username/revenant.git
+pip install git+https://github.com/areeves/revenant.git
 ```
 
 Or for local development (editable install, so code changes take effect
 immediately):
 
 ```bash
-git clone https://github.com/TODO-replace-with-your-username/revenant.git
+git clone https://github.com/areeves/revenant.git
 cd revenant
 pip install -e ".[dev]"
 ```
