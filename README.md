@@ -1,3 +1,5 @@
+[![Project banner](revenant_logo.png)](https://github.com/areeves/revenant)
+
 # revenant
 
 A crash-safe, resumable, file-based pipeline framework for Python.
