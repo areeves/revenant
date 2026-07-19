@@ -2,11 +2,12 @@
 
 A crash-safe, resumable, file-based pipeline framework for Python.
 
-Runs a chain of stages over a batch of input items, where each stage can
-emit zero, one, or many outputs per input. Stages run concurrently as
-separate processes and all progress is durably checkpointed to plain
-JSON files on disk -- so a crash or restart only reprocesses the item
-that was interrupted, not the whole run.
+Runs a chain of stages over a batch of input items, each stage running as its
+own process and emitting zero, one, or many outputs per input. Progress is
+durably checkpointed to plain JSON files on disk, so a crash or restart only
+reprocesses the interrupted item, not the whole run. No external services
+required (no Postgres, Redis, or broker)  just a single process tree writing to
+a bind-mounted volume.
 
 See [`docs/design.md`](docs/design.md) for the full design rationale.
 The stage runner is fully implemented and runnable end-to-end through
