@@ -27,6 +27,7 @@ from revenant.io_utils import (
     read_last_checkpoint_line,
 )
 from revenant.step import RetryableError, SkipItem
+from revenant.blob_store import BlobStore
 
 POLL_INTERVAL_SECONDS = 1.0
 
@@ -137,6 +138,8 @@ def run_stage(
         last_consumed_seq, last_emitted_seq, saved_state = load_resume_point(stage, state_dir)
 
         step = stage.step_class()
+        step.blob_store = BlobStore(stage.blobs_dir(state_dir), state_dir)
+        step.state_dir = state_dir
         state = step.load(saved_state)
 
         input_final_seq = read_input_final_seq(state_dir)

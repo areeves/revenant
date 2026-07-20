@@ -69,3 +69,6 @@ class StageConfig:
         if self.upstream == "input":
             return state_dir / "input.jsonl"
         return state_dir / f"{self.upstream}.jsonl"
+
+    def blobs_dir(self, state_dir: Path) -> Path:
+        return state_dir / f"{self.name}.blobs"
