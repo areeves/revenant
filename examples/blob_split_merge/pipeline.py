@@ -37,16 +37,16 @@ class MergeFile(Step):
     """Stateful: collect blob parts until the file can be reassembled."""
 
     def process(self, payload, state):
-        state = state or {"parts": {}}
         input = payload.get("input")
         part = payload.get("part")
         total = payload.get("total")
-        parts = state.get("parts", {}).get(input, [])
+        state = state or {"parts": {}}
+        parts = state['parts'].setdefault(input, [])
         parts.append(part)
+        state["parts"][input] = parts
         if len(parts) < total:
             # Keep gathering fragments for this input until all expected
             # parts have arrived.
-            state["parts"][input] = parts
             return state
         # Once every fragment is present, read them back from blob storage
         # and emit the merged blob for the original input.
