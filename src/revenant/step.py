@@ -35,6 +35,25 @@ class Step:
     untouched, and the stage process exits non-zero. On restart, the
     same item is retried from scratch. This is intentional — see
     docs/design.md section 8.
+
+    Attributes set by stage runner:
+      blob_store: BlobStore   -- for writing/reading binary artifacts
+                                  too large or unsuitable to embed in
+                                  .jsonl payloads. See
+                                  docs/design-blob-storage.md.
+      state_dir: Path         -- the pipeline's state directory, for
+                                  resolving blob paths read from an
+                                  upstream payload.
+
+    IMPORTANT: a payload field containing a blob path (as returned by
+    self.blob_store.write()/commit()) must not be forwarded unchanged into
+    this step's own yield. If downstream needs the referenced content to
+    persist past this stage, re-write it via self.blob_store into this
+    stage's own blob directory. Blob paths are one-hop only -- see
+    docs/design-blob-storage.md section 1. This is not enforced by the
+    framework; violating it will not fail loudly today, but will make a
+    blob unsafe to reclaim whenever garbage collection is eventually
+    implemented.
     """
 
     def load(self, saved_state: Any | None) -> Any:
